@@ -28,35 +28,35 @@ export const services: Service[] = [
   {
     id: '1',
     name: 'Corte Clásico',
-    description: 'Corte tradicional con acabados profesionales',
+    description: 'Forma clásica, contornos limpios y terminación a tijera.',
     price: 50000,
     duration: 30
   },
   {
     id: '2',
     name: 'Degradado / Fade',
-    description: 'Desde skin fade hasta degradados suaves',
+    description: 'Transición gradual en los laterales y la nuca.',
     price: 60000,
     duration: 45
   },
   {
     id: '3',
     name: 'Barba Clásica',
-    description: 'Perfilado con navaja y acabado perfecto',
+    description: 'Recorte, definición del contorno y perfilado de barba.',
     price: 40000,
     duration: 25
   },
   {
     id: '4',
     name: 'Combo Corte + Barba',
-    description: 'El pack completo para el caballero moderno',
+    description: 'Corte de pelo y perfilado de barba en el mismo turno.',
     price: 90000,
     duration: 60
   },
   {
     id: '5',
     name: 'Perfilado de Cejas',
-    description: 'Definición perfecta con navaja',
+    description: 'Definición de cejas con navaja.',
     price: 20000,
     duration: 15
   }
@@ -129,23 +129,18 @@ export function formatPrice(price: number): string {
   return `Gs. ${price.toLocaleString('es-PY')}`
 }
 
-// Get next N days starting from today
+// Calendar dates in the studio, even when a client books from another time zone.
 export function getNextDays(count: number): Date[] {
   const days: Date[] = []
-  const today = new Date()
-  
-  for (let i = 0; i < count; i++) {
-    const date = new Date(today)
-    date.setDate(today.getDate() + i)
-    // Skip Sundays
-    if (date.getDay() !== 0) {
-      days.push(date)
-    } else {
-      count++ // Add one more day to compensate for skipped Sunday
-    }
+  const shopDay = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Asuncion', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date())
+  const cursor = new Date(shopDay + 'T12:00:00')
+  while (days.length < count) {
+    if (cursor.getDay() !== 0) days.push(new Date(cursor))
+    cursor.setDate(cursor.getDate() + 1)
   }
-  
-  return days.slice(0, count)
+  return days
 }
 
 // Format date for display

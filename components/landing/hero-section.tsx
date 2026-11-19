@@ -1,67 +1,41 @@
-'use client'
+import Image from 'next/image'
+import { ArrowRight, ArrowUpRight } from 'lucide-react'
 
-import { Button } from '@/components/ui/button'
-import { Scissors } from 'lucide-react'
+export const instagramUrl = 'https://www.instagram.com/durerichard10/'
 
-interface HeroSectionProps {
-  onBookingClick: () => void
+export function Masthead({ onBookingClick, onNavigate }: { onBookingClick: () => void; onNavigate: (id: string) => void }) {
+  return (
+    <header className="masthead">
+      <div className="studio-wrap masthead-inner">
+        <a href="/" className="wordmark" aria-label="Richard Dure, inicio">
+          <span className="monogram" aria-hidden="true">R<i>D</i></span>
+          <span className="brand-small">Richard Dure<span>Barber Studio</span></span>
+        </a>
+        <nav aria-label="Principal" className="mast-nav">
+          <a className="nav-text" href="#servicios" onClick={() => onNavigate('services-title')}>Servicios</a>
+          <a className="nav-text" href="#trabajos" onClick={() => onNavigate('works-title')}>Trabajos</a>
+          <button type="button" onClick={onBookingClick} className="nav-book">Reservar <ArrowUpRight size={15}/></button>
+        </nav>
+      </div>
+    </header>
+  )
 }
 
-export function HeroSection({ onBookingClick }: HeroSectionProps) {
+export function HeroSection({ onBookingClick, featured }: { onBookingClick: () => void; featured?: { src: string; caption: string } }) {
   return (
-    <section className="relative min-h-[80vh] flex items-center justify-center overflow-hidden">
-      {/* Background gradient overlay */}
-      <div className="absolute inset-0 bg-gradient-to-b from-background via-background/95 to-background" />
-      
-      {/* Decorative elements */}
-      <div className="absolute top-20 left-10 w-32 h-32 border border-primary/20 rounded-full opacity-30" />
-      <div className="absolute bottom-20 right-10 w-48 h-48 border border-primary/10 rounded-full opacity-20" />
-      
-      <div className="relative z-10 text-center px-4 max-w-4xl mx-auto">
-        {/* Logo/Icon */}
-        <div className="flex justify-center mb-6">
-          <div className="p-4 rounded-full border-2 border-primary/50 bg-card">
-            <Scissors className="w-10 h-10 text-primary" />
+    <section className="studio-hero" aria-labelledby="studio-title">
+      <div className="studio-wrap hero-grid">
+        <div className="hero-copy">
+          <p className="studio-overline"><span aria-hidden="true" />Barbería de autor</p>
+          <h1 id="studio-title">Richard <em>Dure</em></h1>
+          <p className="hero-intro">Cortes clásicos, degradados y barba. Elegí tu servicio y encontrá tu próximo turno.</p>
+          <div className="hero-actions">
+            <button type="button" onClick={onBookingClick} className="primary-book">Reservá tu turno <ArrowRight strokeWidth={1.7} size={19} /></button>
+            <a href="#trabajos" className="work-link">Ver trabajos <ArrowUpRight size={16} /></a>
           </div>
         </div>
-        
-        {/* Main Title */}
-        <h1 className="font-[family-name:var(--font-playfair)] text-5xl md:text-7xl font-bold text-foreground mb-4 tracking-tight">
-          LOHSE BARBER
-        </h1>
-        
-        {/* Subtitle */}
-        <p className="text-lg md:text-xl text-primary font-medium mb-2 tracking-widest uppercase">
-          Creando tu estilo
-        </p>
-        
-        <p className="text-muted-foreground text-base md:text-lg mb-8 max-w-2xl mx-auto leading-relaxed">
-          Los mejores cortes de Encarnación. Experiencia premium, resultados impecables.
-        </p>
-        
-        {/* CTA Button */}
-        <Button 
-          onClick={onBookingClick}
-          size="lg"
-          className="bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-lg px-10 py-6 rounded-full transition-all duration-300 hover:scale-105 shadow-lg shadow-primary/20"
-        >
-          Reservar Turno
-        </Button>
-        
-        {/* Trust indicators */}
-        <div className="mt-12 flex flex-wrap justify-center gap-8 text-sm text-muted-foreground">
-          <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-primary" />
-            <span>+5 años de experiencia</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-primary" />
-            <span>+10,000 cortes realizados</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-primary" />
-            <span>Reserva online 24/7</span>
-          </div>
+        <div className="hero-art">
+          <Image src={featured?.src ?? '/studio-tools.webp'} alt={featured?.caption ?? 'Composición editorial de una tijera de corte y un peine bajo la luz cálida.'} fill sizes="(max-width: 700px) 100vw, 53vw" priority />
         </div>
       </div>
     </section>

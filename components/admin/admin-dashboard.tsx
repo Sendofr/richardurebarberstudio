@@ -1,539 +1,238 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
-import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { formatDate } from '@/lib/mock-data'
-import { toast } from 'sonner'
-import { createClient } from '@/lib/supabase/client'
+import { useEffect, useState } from 'react'
+import Link from 'next/link'
 import type { User } from '@supabase/supabase-js'
-import { 
-  Scissors, 
-  LogOut, 
-  Calendar, 
-  Clock, 
-  User as UserIcon, 
-  Phone, 
-  XCircle, 
-  CheckCircle,
-  AlertCircle,
-  RefreshCw,
-  X
-} from 'lucide-react'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
-import { cn } from '@/lib/utils'
-
-interface Turno {
-  id: string
-  fecha: string
-  hora: string
-  barbero_id: number
-  cliente_nombre: string
-  cliente_telefono: string
-  servicio: string | null
-  estado: 'pendiente' | 'confirmado' | 'cancelado' | 'bloqueado'
-  created_at: string
-  barberos: {
-    nombre: string
-  } | null
-}
+import { CalendarDays, LockKeyhole, LogOut, RefreshCw, Wallet } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
+import { FinancePanel } from '@/components/admin/finance-panel'
+import { createClient } from '@/lib/supabase/client'
+import { ALL_TIME_SLOTS } from '@/lib/mock-data'
 
 interface Barbero {
   id: number
   nombre: string
-  especialidad: string
-  foto_url: string | null
-  auth_user_id: string | null
-  created_at: string
 }
 
-interface AdminDashboardProps {
+interface Turno {
+  id: string
+  hora: string
+  cliente_nombre: string
+  cliente_telefono: string
+  servicio: string | null
+  estado: 'pendiente' | 'confirmado' | 'cancelado' | 'bloqueado'
+}
+
+interface DashboardProps {
   user: User
-  onLogout: () => void
+  onLogout: () => Promise<void>
 }
 
-export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
-  const [currentBarber, setCurrentBarber] = useState<Barbero | null>(null)
+const shopDay = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Asuncion', year: 'numeric', month: '2-digit', day: '2-digit' })
+const friendlyDay = new Intl.DateTimeFormat('es-PY', { dateStyle: 'full', timeZone: 'UTC' })
+const actionLabels = { confirmado: 'Cancelar', pendiente: 'Cancelar', bloqueado: 'Desbloquear', cancelado: 'Restaurar' }
+
+export function AdminDashboard({ user, onLogout }: DashboardProps) {
+  const [barber, setBarber] = useState<Barbero | null>(null)
+  const [profileState, setProfileState] = useState<'loading' | 'error' | 'done'>('loading')
+  const [profileAttempt, setProfileAttempt] = useState(0)
   const [turnos, setTurnos] = useState<Turno[]>([])
-  const [isLoading, setIsLoading] = useState(true)
-  const [isUpdating, setIsUpdating] = useState<string | null>(null)
-  const [selectedDate] = useState(new Date())
-  const [isBlockModalOpen, setIsBlockModalOpen] = useState(false)
-  
-  const supabase = createClient()
-  
-  const todayStr = selectedDate.toISOString().split('T')[0]
-  
-  // Fetch current barber profile
-  const fetchCurrentBarber = useCallback(async () => {
-    if (!user?.id) return
-    
-    const { data, error } = await supabase
-      .from('barberos')
-      .select('*')
-      .eq('auth_user_id', user.id)
-      .single()
-    
-    if (error) {
-      console.error('[v0] Error fetching barber profile:', error)
-      toast.error('Error al cargar tu perfil', {
-        description: error.message,
-      })
-      return
-    }
-    
-    if (data) {
-      setCurrentBarber(data)
-    }
-  }, [user?.id, supabase])
-  
-  const fetchTurnos = useCallback(async () => {
-    if (!currentBarber?.id) return
-    
-    setIsLoading(true)
-    
-    const { data, error } = await supabase
-      .from('turnos')
-      .select('*, barberos(nombre)')
-      .eq('fecha', todayStr)
-      .eq('barbero_id', currentBarber.id)
-      .order('hora', { ascending: true })
-    
-    if (error) {
-      toast.error('Error al cargar turnos', {
-        description: error.message,
-      })
-      setIsLoading(false)
-      return
-    }
-    
-    setTurnos(data || [])
-    setIsLoading(false)
-  }, [supabase, todayStr, currentBarber?.id])
-  
-  useEffect(() => {
-    fetchCurrentBarber()
-  }, [fetchCurrentBarber])
-  
-  useEffect(() => {
-    if (currentBarber?.id) {
-      fetchTurnos()
-    }
-  }, [fetchTurnos, currentBarber?.id])
-  
-  const confirmedTurnos = turnos.filter(t => t.estado === 'confirmado')
-  const cancelledTurnos = turnos.filter(t => t.estado === 'cancelado')
+  const [agendaState, setAgendaState] = useState<'loading' | 'error' | 'done'>('loading')
+  const [revision, setRevision] = useState(0)
+  const [today, setToday] = useState(() => shopDay.format(new Date()))
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState('')
+  const [actionError, setActionError] = useState('')
+  const [blocking, setBlocking] = useState(false)
+  const [section, setSection] = useState<'agenda' | 'caja'>('agenda')
 
-  const handleCancelTurno = async (turnoId: string) => {
-    setIsUpdating(turnoId)
-    
-    const { error } = await supabase
-      .from('turnos')
-      .update({ estado: 'cancelado' })
-      .eq('id', turnoId)
-    
-    if (error) {
-      toast.error('Error al cancelar turno', {
-        description: error.message,
-      })
-      setIsUpdating(null)
-      return
+  useEffect(() => {
+    const timer = window.setInterval(() => setToday(shopDay.format(new Date())), 30_000)
+    return () => window.clearInterval(timer)
+  }, [])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    async function loadProfile() {
+      setProfileState('loading')
+      const { data, error } = await createClient().from('barberos')
+        .select('id, nombre').eq('auth_user_id', user.id).abortSignal(controller.signal).maybeSingle()
+      if (controller.signal.aborted) return
+      setBarber(error ? null : data)
+      setProfileState(error ? 'error' : 'done')
     }
-    
-    // Update local state
-    setTurnos(prev => 
-      prev.map(turno => 
-        turno.id === turnoId 
-          ? { ...turno, estado: 'cancelado' as const }
-          : turno
-      )
-    )
-    
-    toast.success('Turno cancelado', {
-      description: 'El horario ha sido liberado y está disponible nuevamente.',
-    })
-    setIsUpdating(null)
+    void loadProfile()
+    return () => controller.abort()
+  }, [user.id, profileAttempt])
+
+  useEffect(() => {
+    if (!barber) return
+    const barberId = barber.id
+    const controller = new AbortController()
+    async function loadAgenda() {
+      setAgendaState('loading')
+      const { data, error } = await createClient().from('turnos')
+        .select('id, hora, cliente_nombre, cliente_telefono, servicio, estado')
+        .eq('fecha', today).eq('barbero_id', barberId).order('hora').abortSignal(controller.signal)
+      if (controller.signal.aborted) return
+      setTurnos(error ? [] : data || [])
+      setAgendaState(error ? 'error' : 'done')
+    }
+    void loadAgenda()
+    return () => controller.abort()
+  }, [barber, today, revision])
+
+  async function changeTurno(turno: Turno, action: 'cancelar' | 'confirmar' | 'desbloquear') {
+    if (!barber || busy) return
+    setBusy(true)
+    setMessage('')
+    setActionError('')
+    try {
+      const table = createClient().from('turnos')
+      const next = action === 'confirmar' ? 'confirmado' : 'cancelado'
+      const query = action === 'desbloquear' ? table.delete() : table.update({ estado: next })
+      const { data, error } = await query.eq('id', turno.id).eq('barbero_id', barber.id)
+        .eq('estado', turno.estado).select('id').maybeSingle()
+      if (error?.code === '23505') setActionError('Ya se ocupó ese horario. Elegí otro turno.')
+      else if (error || !data) setActionError('No se pudo aplicar el cambio. Revisá la agenda actualizada.')
+      else if (action === 'desbloquear') setMessage('Horario desbloqueado.')
+      else if (action === 'cancelar') setMessage('Turno cancelado.')
+      else setMessage(turno.estado === 'pendiente' ? 'Turno confirmado.' : 'Turno restaurado.')
+    } catch {
+      setActionError('No pudimos verificar el cambio. Revisá la agenda antes de volver a intentar.')
+    } finally {
+      setBusy(false)
+      setRevision(value => value + 1)
+    }
   }
 
-  const handleRestoreTurno = async (turnoId: string) => {
-    setIsUpdating(turnoId)
-    
-    const { error } = await supabase
-      .from('turnos')
-      .update({ estado: 'confirmado' })
-      .eq('id', turnoId)
-    
-    if (error) {
-      toast.error('Error al restaurar turno', {
-        description: error.message,
+  async function blockTime(time: string) {
+    if (!barber || busy) return
+    setBusy(true)
+    setActionError('')
+    setMessage('')
+    try {
+      const { error } = await createClient().from('turnos').insert({
+        barbero_id: barber.id, fecha: today, hora: time + ':00',
+        cliente_nombre: 'BLOQUEADO', cliente_telefono: 'N/A', estado: 'bloqueado',
       })
-      setIsUpdating(null)
-      return
+      if (error) setActionError(error.code === '23505' ? 'Ese horario ya está ocupado.' : 'No pudimos bloquear el horario.')
+      else {
+        setBlocking(false)
+        setMessage('Horario bloqueado a las ' + time + '.')
+      }
+    } catch {
+      setActionError('No pudimos verificar el bloqueo. Revisá tu conexión.')
+    } finally {
+      setBusy(false)
+      setRevision(value => value + 1)
     }
-    
-    // Update local state
-    setTurnos(prev => 
-      prev.map(turno => 
-        turno.id === turnoId 
-          ? { ...turno, estado: 'confirmado' as const }
-          : turno
-      )
-    )
-    
-    toast.success('Turno restaurado', {
-      description: 'El turno ha sido confirmado nuevamente.',
-    })
-    setIsUpdating(null)
   }
 
-  // Available time slots for blocking
-  const allTimeSlots = [
-    '09:00', '09:30', '10:00', '10:30', '11:00', '11:30',
-    '12:00', '14:00', '14:30', '15:00', '15:30', '16:00',
-    '16:30', '17:00', '17:30', '18:00', '18:30', '19:00'
+  async function logout() {
+    setBusy(true)
+    try {
+      await onLogout()
+    } catch {
+      setActionError('No pudimos cerrar la sesión. Volvé a intentar.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const occupied = new Set(turnos.filter(turno => turno.estado !== 'cancelado').map(turno => turno.hora.slice(0, 5)))
+  const counts = [
+    { label: 'Confirmados', value: turnos.filter(turno => turno.estado === 'confirmado').length },
+    { label: 'Pendientes', value: turnos.filter(turno => turno.estado === 'pendiente').length },
+    { label: 'Cancelados', value: turnos.filter(turno => turno.estado === 'cancelado').length },
   ]
 
-  // Get occupied times from today's turnos
-  const occupiedTimes = turnos
-    .filter(t => t.estado !== 'cancelado')
-    .map(t => t.hora.slice(0, 5))
-
-  const handleBlockHorario = async (horaBloqueo: string) => {
-    if (!currentBarber?.id) return
-
-    setIsUpdating('block-' + horaBloqueo)
-
-    const { error } = await supabase.from('turnos').insert([{
-      barbero_id: currentBarber.id,
-      fecha: todayStr,
-      hora: horaBloqueo + ':00',
-      cliente_nombre: 'BLOQUEADO',
-      cliente_telefono: 'N/A',
-      estado: 'bloqueado'
-    }])
-
-    if (error) {
-      toast.error('Error al bloquear horario', {
-        description: error.message?.includes('duplicate') || error.message?.includes('unique')
-          ? 'Este horario ya está ocupado o bloqueado.'
-          : error.message,
-      })
-      setIsUpdating(null)
-      return
-    }
-
-    toast.success('Horario bloqueado', {
-      description: `El horario de ${horaBloqueo} ha sido bloqueado en tu agenda.`,
-    })
-    
-    setIsBlockModalOpen(false)
-    fetchTurnos()
-    setIsUpdating(null)
-  }
-
-  const handleUnblockHorario = async (turnoId: string) => {
-    setIsUpdating(turnoId)
-    
-    const { error } = await supabase
-      .from('turnos')
-      .delete()
-      .eq('id', turnoId)
-    
-    if (error) {
-      toast.error('Error al desbloquear horario', {
-        description: error.message,
-      })
-      setIsUpdating(null)
-      return
-    }
-    
-    // Update local state
-    setTurnos(prev => prev.filter(turno => turno.id !== turnoId))
-    
-    toast.success('Horario desbloqueado', {
-      description: 'El horario ha sido liberado y está disponible nuevamente.',
-    })
-    setIsUpdating(null)
-  }
-
-  const { day, dayNum, month } = formatDate(selectedDate)
-
   return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="bg-card border-b border-border sticky top-0 z-50">
-        <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
-            <div>
-            <CardTitle className="text-foreground">
-              {currentBarber ? `Bienvenido al panel, ${currentBarber.nombre}` : 'Panel de Administración'}
-            </CardTitle>
-            <CardDescription className="text-muted-foreground">
-              {currentBarber?.especialidad && `${currentBarber.especialidad} • `}
-              {user.email}
-            </CardDescription>
-          </div>
-          
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={onLogout}
-            className="border-border hover:border-destructive hover:text-destructive"
-          >
-            <LogOut className="w-4 h-4 mr-2" />
-            Salir
-          </Button>
+    <div className="min-h-svh bg-background">
+      <header className="border-b border-border">
+        <div className="mx-auto flex max-w-5xl items-center justify-between gap-4 px-5 py-4 sm:px-8">
+          <Link href="/" aria-label="Richard Dure, inicio" className="font-serif text-2xl tracking-tight">Richard <i>Dure</i></Link>
+          <Button variant="outline" className="h-11" disabled={busy} onClick={logout}><LogOut />Salir</Button>
         </div>
       </header>
-
-      {/* Main Content */}
-      <main className="max-w-6xl mx-auto px-4 py-8">
-        {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-          <Card className="bg-card border-border">
-            <CardContent className="p-4 flex items-center gap-4">
-              <div className="p-3 rounded-full bg-primary/20">
-                <Calendar className="w-6 h-6 text-primary" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold text-foreground">{turnos.length}</p>
-                <p className="text-sm text-muted-foreground">Turnos Hoy</p>
-              </div>
-            </CardContent>
-          </Card>
-          
-          <Card className="bg-card border-border">
-            <CardContent className="p-4 flex items-center gap-4">
-              <div className="p-3 rounded-full bg-green-500/20">
-                <CheckCircle className="w-6 h-6 text-green-500" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold text-foreground">{confirmedTurnos.length}</p>
-                <p className="text-sm text-muted-foreground">Confirmados</p>
-              </div>
-            </CardContent>
-          </Card>
-          
-          <Card className="bg-card border-border">
-            <CardContent className="p-4 flex items-center gap-4">
-              <div className="p-3 rounded-full bg-destructive/20">
-                <AlertCircle className="w-6 h-6 text-destructive" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold text-foreground">{cancelledTurnos.length}</p>
-                <p className="text-sm text-muted-foreground">Cancelados</p>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Today's Date */}
-        <Card className="bg-card border-border mb-6">
-          <CardHeader className="pb-2">
-            <div className="flex items-center justify-between">
-              <div>
-                <CardTitle className="flex items-center gap-2 text-foreground">
-                  <Calendar className="w-5 h-5 text-primary" />
-                  Turnos del Día
-                </CardTitle>
-                <CardDescription className="text-muted-foreground">
-                  {day} {dayNum} de {month}, {selectedDate.getFullYear()}
-                </CardDescription>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={fetchTurnos}
-                disabled={isLoading}
-                className="border-border"
-              >
-                <RefreshCw className={cn("w-4 h-4 mr-2", isLoading && "animate-spin")} />
-                Actualizar
-              </Button>
-              <Button
-                size="sm"
-                onClick={() => setIsBlockModalOpen(true)}
-                disabled={isUpdating !== null}
-                variant="secondary"
-                className="bg-secondary hover:bg-secondary/80"
-              >
-                Bloquear Horario
-              </Button>
-            </div>
-          </CardHeader>
-        </Card>
-
-        {/* Bookings List */}
-        <div className="space-y-4">
-          {isLoading ? (
-            <Card className="bg-card border-border">
-              <CardContent className="p-8 text-center">
-                <RefreshCw className="w-12 h-12 text-primary mx-auto mb-4 animate-spin" />
-                <p className="text-foreground font-medium">Cargando turnos...</p>
-              </CardContent>
-            </Card>
-          ) : turnos.length === 0 ? (
-            <Card className="bg-card border-border">
-              <CardContent className="p-8 text-center">
-                <Calendar className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-                <p className="text-foreground font-medium">No hay turnos para hoy</p>
-                <p className="text-sm text-muted-foreground">Los nuevos turnos aparecerán aquí</p>
-              </CardContent>
-            </Card>
-          ) : (
-            turnos.map((turno) => (
-              <Card 
-                key={turno.id}
-                className={cn(
-                  "bg-card border-border transition-all",
-                  turno.estado === 'cancelado' && "opacity-60"
-                )}
-              >
-                <CardContent className="p-4">
-                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                    {/* Time & Service */}
-                    <div className="flex items-center gap-4">
-                      <div className={cn(
-                        "w-16 h-16 rounded-lg flex flex-col items-center justify-center",
-                        turno.estado === 'cancelado' 
-                          ? "bg-destructive/10 text-destructive"
-                          : "bg-primary/20 text-primary"
-                      )}>
-                        <Clock className="w-4 h-4 mb-1" />
-                        <span className="font-bold text-sm">{turno.hora.slice(0, 5)}</span>
-                      </div>
-                      
-                      <div>
-                        <h3 className="font-medium text-foreground text-lg">
-                          {turno.cliente_nombre}
-                        </h3>
-                        <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4 text-sm text-muted-foreground mt-1">
-                          <span className="flex items-center gap-1">
-                            <Phone className="w-3 h-3" />
-                            {turno.cliente_telefono}
-                          </span>
-                          {turno.servicio && (
-                            <span className="flex items-center gap-1">
-                              <Scissors className="w-3 h-3" />
-                              {turno.servicio}
-                            </span>
-                          )}
+      <main className="mx-auto max-w-5xl px-5 py-8 sm:px-8 sm:py-14">
+        {profileState === 'loading' ? <p role="status">Cargando tu perfil…</p> : !barber ? (
+          <section className="max-w-lg">
+            <h1 className="font-serif text-4xl">{profileState === 'error' ? 'No pudimos verificar tu perfil' : 'Acceso sin perfil de barbero'}</h1>
+            <p className="my-4 text-muted-foreground">{profileState === 'error' ? 'Comprobá tu conexión y volvé a intentar.' : 'Tu cuenta necesita un perfil de barbero vinculado para acceder a la agenda.'}</p>
+            <Button variant="outline" onClick={() => setProfileAttempt(value => value + 1)}>Volver a comprobar</Button>
+          </section>
+        ) : (
+          <>
+            <p className="mb-3 text-xs font-semibold uppercase tracking-[.18em] text-primary">{barber.nombre}</p>
+            <h1 className="font-serif text-5xl tracking-[-.045em] sm:text-7xl">{section === 'agenda' ? 'Agenda del día' : 'Caja personal'}</h1>
+            <nav aria-label="Secciones del panel" className="my-6 flex gap-2 border-b border-border pb-5">
+              <Button variant={section === 'agenda' ? 'default' : 'outline'} aria-pressed={section === 'agenda'} className="h-11" onClick={() => setSection('agenda')}><CalendarDays /> Agenda</Button>
+              <Button variant={section === 'caja' ? 'default' : 'outline'} aria-pressed={section === 'caja'} className="h-11" onClick={() => setSection('caja')}><Wallet /> Caja</Button>
+            </nav>
+            {section === 'caja' ? <FinancePanel key={barber.id} barberId={barber.id} /> : (
+              <section aria-label="Agenda de hoy">
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                  <h2 className="font-serif text-xl capitalize sm:text-2xl">{friendlyDay.format(new Date(today + 'T12:00:00Z'))}</h2>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button variant="outline" className="h-11" disabled={busy || agendaState === 'loading'} onClick={() => setRevision(value => value + 1)}><RefreshCw />Actualizar</Button>
+                    <Dialog open={blocking} onOpenChange={open => { setBlocking(open); setActionError('') }}>
+                      <DialogTrigger asChild><Button className="h-11" variant="secondary" disabled={busy || agendaState !== 'done'}><LockKeyhole />Bloquear horario</Button></DialogTrigger>
+                      <DialogContent className="max-h-[88svh] overflow-y-auto">
+                        <DialogHeader><DialogTitle>Bloquear horario</DialogTitle><DialogDescription>Elegí un horario para bloquear en tu agenda de hoy.</DialogDescription></DialogHeader>
+                        {actionError && <p role="alert">{actionError}</p>}
+                        <div className="grid grid-cols-3 gap-2">
+                          {ALL_TIME_SLOTS.map(time => <button key={time} type="button" disabled={busy || occupied.has(time) || agendaState !== 'done'} onClick={() => blockTime(time)} className="rounded border border-border p-2 text-center hover:border-primary disabled:opacity-60">
+                            <span className="block font-medium tabular-nums">{time}</span><small>{occupied.has(time) ? 'Ocupado' : 'Disponible'}</small>
+                          </button>)}
                         </div>
-                      </div>
-                    </div>
-                    
-                    {/* Status & Actions */}
-                    <div className="flex items-center gap-2">
-                      <span className={cn(
-                        "px-3 py-1 rounded-full text-xs font-medium",
-                        turno.estado === 'confirmado' 
-                          ? "bg-green-500/20 text-green-500"
-                          : turno.estado === 'cancelado'
-                            ? "bg-destructive/20 text-destructive"
-                            : turno.estado === 'pendiente'
-                              ? "bg-yellow-500/20 text-yellow-500"
-                              : "bg-blue-500/20 text-blue-500"
-                      )}>
-                        {turno.estado === 'confirmado' ? 'Confirmado' : 
-                         turno.estado === 'cancelado' ? 'Cancelado' : 
-                         turno.estado === 'pendiente' ? 'Pendiente' : 'Bloqueado'}
-                      </span>
-                      
-                      {(turno.estado === 'confirmado' || turno.estado === 'pendiente') ? (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleCancelTurno(turno.id)}
-                          disabled={isUpdating === turno.id}
-                          className="text-muted-foreground hover:text-destructive"
-                        >
-                          {isUpdating === turno.id ? (
-                            <RefreshCw className="w-4 h-4 animate-spin" />
-                          ) : (
-                            <XCircle className="w-4 h-4" />
-                          )}
-                        </Button>
-                      ) : turno.estado === 'cancelado' ? (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleRestoreTurno(turno.id)}
-                          disabled={isUpdating === turno.id}
-                          className="text-muted-foreground hover:text-green-500"
-                        >
-                          {isUpdating === turno.id ? (
-                            <RefreshCw className="w-4 h-4 animate-spin" />
-                          ) : (
-                            <CheckCircle className="w-4 h-4" />
-                          )}
-                        </Button>
-                      ) : turno.estado === 'bloqueado' && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleUnblockHorario(turno.id)}
-                          disabled={isUpdating === turno.id}
-                          className="text-muted-foreground hover:text-blue-500"
-                          title="Desbloquear horario"
-                        >
-                          {isUpdating === turno.id ? (
-                            <RefreshCw className="w-4 h-4 animate-spin" />
-                          ) : (
-                            <X className="w-4 h-4" />
-                          )}
-                        </Button>
-                      )}
-                    </div>
+                      </DialogContent>
+                    </Dialog>
                   </div>
-                </CardContent>
-              </Card>
-            ))
-          )}
-        </div>
+                </div>
+                {agendaState === 'loading' ? <p className="py-8" role="status">Cargando turnos…</p> : agendaState === 'error' ? <p className="py-8" role="alert">No pudimos cargar los turnos. Usá el botón Actualizar para reintentar.</p> : (
+                  <>
+                    <dl className="my-6 grid grid-cols-3 divide-x divide-border border-y border-border bg-card py-5">
+                      {counts.map(({ label, value }) => <div key={label} className="flex flex-col-reverse gap-1 px-2 text-center sm:px-6 sm:text-left"><dt className="text-xs text-muted-foreground sm:text-sm">{label}</dt><dd className="font-serif text-3xl tabular-nums">{value}</dd></div>)}
+                    </dl>
+                    {turnos.length === 0 ? <p className="py-5 text-muted-foreground">No hay turnos para hoy.</p> : (
+                      <ul className="divide-y divide-border border-b border-border">
+                        {turnos.map(turno => <li key={turno.id} className="grid grid-cols-[auto_1fr] items-start gap-x-4 gap-y-2 py-4 sm:grid-cols-[5rem_1fr_auto] sm:items-center">
+                          <span className="font-serif text-2xl tabular-nums text-primary">{turno.hora.slice(0, 5)}</span>
+                          <div className="min-w-0 break-words">
+                            <p className="font-medium">{turno.estado === 'bloqueado' ? 'Horario bloqueado' : turno.cliente_nombre}</p>
+                            {turno.estado !== 'bloqueado' && <p className="mt-1 text-sm text-muted-foreground">{[turno.servicio, turno.cliente_telefono].filter(Boolean).join(' · ')}</p>}
+                          </div>
+                          <div className="col-start-2 flex flex-wrap items-center justify-between gap-2 sm:col-start-auto sm:gap-4">
+                            <span className="text-sm capitalize text-muted-foreground">{turno.estado}</span>
+                            {turno.estado === 'pendiente' && (
+                              <Button className="h-11" disabled={busy} onClick={() => changeTurno(turno, 'confirmar')} aria-label={'Confirmar turno de las ' + turno.hora.slice(0, 5)}>
+                                Confirmar
+                              </Button>
+                            )}
+                            <Button
+                              variant="outline"
+                              className="h-11"
+                              disabled={busy}
+                              onClick={() => changeTurno(turno, turno.estado === 'bloqueado' ? 'desbloquear' : turno.estado === 'cancelado' ? 'confirmar' : 'cancelar')}
+                              aria-label={actionLabels[turno.estado] + ' turno de las ' + turno.hora.slice(0, 5)}
+                            >
+                              {actionLabels[turno.estado]}
+                            </Button>
+                          </div>
+                        </li>)}
+                      </ul>
+                    )}
+                  </>
+                )}
+              </section>
+            )}
+          </>
+        )}
+        <p role="status" className="mt-4 text-sm text-primary">{message}</p>
+        {actionError && !blocking && <p role="alert" className="mt-4">{actionError}</p>}
       </main>
-
-      {/* Block Time Modal */}
-      <Dialog open={isBlockModalOpen} onOpenChange={setIsBlockModalOpen}>
-        <DialogContent className="bg-card border-border max-w-md">
-          <DialogHeader>
-            <DialogTitle className="text-foreground">Bloquear Horario</DialogTitle>
-            <DialogDescription className="text-muted-foreground">
-              Selecciona un horario disponible para bloquear en tu agenda de hoy.
-            </DialogDescription>
-          </DialogHeader>
-          
-          <div className="grid grid-cols-3 gap-3 py-4">
-            {allTimeSlots.map((time) => {
-              const isOccupied = occupiedTimes.includes(time)
-              const isBlocking = isUpdating === 'block-' + time
-              
-              return (
-                <button
-                  key={time}
-                  onClick={() => !isOccupied && handleBlockHorario(time)}
-                  disabled={isOccupied || isUpdating !== null}
-                  className={cn(
-                    "py-3 px-4 rounded-lg border-2 transition-all text-center font-medium",
-                    isOccupied 
-                      ? "border-border bg-secondary/50 text-muted-foreground cursor-not-allowed opacity-50" 
-                      : "border-border bg-card hover:border-primary hover:bg-primary/10 text-foreground"
-                  )}
-                >
-                  <div className="text-sm">{time}</div>
-                  <div className="text-xs mt-1 text-muted-foreground">
-                    {isBlocking ? 'Bloqueando...' : isOccupied ? 'Ocupado' : 'Disponible'}
-                  </div>
-                </button>
-              )
-            })}
-          </div>
-        </DialogContent>
-      </Dialog>
     </div>
   )
 }
