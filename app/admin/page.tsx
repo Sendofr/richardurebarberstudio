@@ -1,55 +1,56 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { AdminLogin } from '@/components/admin/admin-login'
 import { AdminDashboard } from '@/components/admin/admin-dashboard'
 import { createClient } from '@/lib/supabase/client'
 import type { User } from '@supabase/supabase-js'
 
+const configured = Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY)
+
 export default function AdminPage() {
   const [user, setUser] = useState<User | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
-  
-  const supabase = createClient()
-  
+  const [loading, setLoading] = useState(configured)
+  const [sessionError, setSessionError] = useState('')
+
   useEffect(() => {
-    // Check for existing session on mount
-    const checkSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession()
+    if (!configured) return
+    const supabase = createClient()
+    let active = true
+    let receivedEvent = false
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!active) return
+      receivedEvent = true
       setUser(session?.user ?? null)
-      setIsLoading(false)
-    }
-    
-    checkSession()
-    
-    // Listen for auth state changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
-        setUser(session?.user ?? null)
+      setLoading(false)
+      setSessionError('')
+    })
+    async function restoreSession() {
+      try {
+        const { data, error } = await supabase.auth.getSession()
+        if (!active || receivedEvent) return
+        if (error) throw error
+        setUser(data.session?.user ?? null)
+      } catch {
+        if (active && !receivedEvent) setSessionError('No pudimos recuperar tu sesión. Volvé a ingresar.')
+      } finally {
+        if (active) setLoading(false)
       }
-    )
-    
+    }
+    void restoreSession()
     return () => {
+      active = false
       subscription.unsubscribe()
     }
-  }, [supabase.auth])
+  }, [])
 
-  const handleLogout = async () => {
-    await supabase.auth.signOut()
+  async function logout() {
+    const { error } = await createClient().auth.signOut()
+    if (error) throw error
     setUser(null)
   }
 
-  if (isLoading) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="animate-pulse text-primary">Cargando...</div>
-      </div>
-    )
-  }
-
-  if (!user) {
-    return <AdminLogin onLogin={(loggedInUser) => setUser(loggedInUser)} />
-  }
-
-  return <AdminDashboard user={user} onLogout={handleLogout} />
+  if (loading) return <main className="grid min-h-svh place-items-center bg-background"><p role="status">Cargando tu sesión…</p></main>
+  if (!user) return <AdminLogin onLogin={setUser} configured={configured} sessionError={sessionError} />
+  return <AdminDashboard key={user.id} user={user} onLogout={logout} />
 }

@@ -1,57 +1,22 @@
-'use client'
+import { existsSync } from 'node:fs'
+import path from 'node:path'
+import { StudioHome } from '@/components/landing/studio-home'
 
-import { useState } from 'react'
-import { HeroSection } from '@/components/landing/hero-section'
-import { BarbersSection } from '@/components/landing/barbers-section'
-import { ServicesSection } from '@/components/landing/services-section'
-import { BookingEngine } from '@/components/booking/booking-engine'
-import { Footer } from '@/components/landing/footer'
-import { WhatsAppButton } from '@/components/whatsapp-button'
+// Filenames follow the six original photos supplied by the studio, in order.
+const photos = [
+  ['degradado-bajo', 'Degradado bajo con volumen en la nuca'],
+  ['linea-lateral', 'Textura y línea de diseño lateral'],
+  ['flequillo', 'Flequillo recto y sien degradada'],
+  ['barba-perfilada', 'Corte corto con barba perfilada'],
+  ['diseno', 'Degradado con diseño en la nuca'],
+  ['plateado', 'Textura plateada sobre laterales degradados'],
+]
 
 export default function HomePage() {
-  const [isBookingOpen, setIsBookingOpen] = useState(false)
-  const [preSelectedBarberId, setPreSelectedBarberId] = useState<string | undefined>()
-
-  const handleOpenBooking = () => {
-    setPreSelectedBarberId(undefined)
-    setIsBookingOpen(true)
-    // Scroll to booking section
-    setTimeout(() => {
-      document.getElementById('booking')?.scrollIntoView({ behavior: 'smooth' })
-    }, 100)
-  }
-
-  const handleSelectBarber = (barberId: string) => {
-    setPreSelectedBarberId(barberId)
-    setIsBookingOpen(true)
-    // Scroll to booking section
-    setTimeout(() => {
-      document.getElementById('booking')?.scrollIntoView({ behavior: 'smooth' })
-    }, 100)
-  }
-
-  const handleCloseBooking = () => {
-    setIsBookingOpen(false)
-    setPreSelectedBarberId(undefined)
-  }
-
-  return (
-    <main className="min-h-screen bg-background">
-      <HeroSection onBookingClick={handleOpenBooking} />
-      
-      <BookingEngine 
-        isOpen={isBookingOpen}
-        onClose={handleCloseBooking}
-        preSelectedBarberId={preSelectedBarberId}
-      />
-      
-      <BarbersSection onSelectBarber={handleSelectBarber} />
-      
-      <ServicesSection onBookingClick={handleOpenBooking} />
-      
-      <Footer />
-      
-      <WhatsAppButton />
-    </main>
-  )
+  const work = photos.flatMap(([name, caption]) => {
+    const image = ['webp', 'jpg', 'jpeg', 'png'].find(ext =>
+      existsSync(path.join(process.cwd(), 'public', 'trabajos', name + '.' + ext)))
+    return image ? [{ src: '/trabajos/' + name + '.' + image, caption }] : []
+  })
+  return <StudioHome work={work} />
 }
